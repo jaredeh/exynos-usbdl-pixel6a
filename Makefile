@@ -3,14 +3,14 @@ CFLAGS  ?= -g -O0 -Wall
 LDFLAGS ?= 
 LDLIBS  ?= -lusb-1.0
 
-OBJS  = exynos-usbdl.o
+OBJS  = exynos-usbdl.o printdev.o
 BIN   = exynos-usbdl
 
 %.o: %.c
-	$(CC) $(CFLAGS) -c -o $@ $<
+	gcc $(CFLAGS) -c -o $@ $<
 
 $(BIN): $(OBJS)
-	$(CC) $(CFLAGS) $(LDFLAGS) $(LDLIBS) -o $@ $^
+	gcc -g -O0 -Wall -o $(BIN) $(OBJS) -lusb-1.0
 
 .PHONY: clean
 clean:

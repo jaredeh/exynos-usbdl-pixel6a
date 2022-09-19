@@ -9,9 +9,9 @@
 #include <assert.h>
 #include "libusb-1.0/libusb.h"
 
-#define DEBUG	0
-#define VENDOR_ID	0x04e8
-#define PRODUCT_ID	0x1234
+#define DEBUG	1
+#define VENDOR_ID	0x4F00
+#define PRODUCT_ID	0x18d1
 #define BLOCK_SIZE		512
 #define CHUNK_SIZE	(uint32_t)0xfffe00
 
@@ -25,6 +25,8 @@ enum {
 	NORMAL_MODE = 0,
 	EXPLOIT_MODE,
 };
+
+libusb_device_handle * getdev(char * productname);
 
 static char *target_names[] = {
 	"Exynos8890",//TARGET_8890
@@ -52,17 +54,25 @@ typedef struct __attribute__ ((__packed__)) dldata_s {
 
 static int send(dldata_t *payload) {
 	int rc;
-	int transferred;
+	int transferred = 0;
+	int len = 0;
 	uint total_size = payload->size;
 	uint8_t *payload_ptr = (uint8_t *)payload;
 
 	do {
-		rc = libusb_bulk_transfer(handle, LIBUSB_ENDPOINT_OUT | 2, payload_ptr, (total_size < BLOCK_SIZE ? total_size : BLOCK_SIZE), &transferred, 0);
+		//len = total_size < BLOCK_SIZE ? total_size : BLOCK_SIZE;
+		len = 512;
+		printf("Attempting libusb_bulk_transfer of len=%d data[0]=0x%08llx at %p endpoint=%d\n", len, ((unsigned long long *)payload_ptr)[1], payload_ptr, LIBUSB_ENDPOINT_OUT);
+		//LIBUSB_ENDPOINT_OUT
+		rc = libusb_bulk_transfer(handle, 2, payload_ptr, len, &transferred, 20000);
 		if(rc) {
 			fprintf(stderr, "Error libusb_bulk_transfer: %s\n", libusb_error_name(rc));
-			return rc;
+			//return rc;
+		} else {
+			printf("libusb_bulk_transfer %d %d\n", transferred, total_size);
 		}
-		dprint("libusb_bulk_transfer: transferred=%d\n", transferred);
+		dprint("libusb_bulk_transfer: transferred=%d total_size=%d\n", transferred, total_size);
+		sleep(1);
 		payload_ptr += transferred;
 		assert(total_size>=transferred);
 		total_size -= transferred;
@@ -239,7 +249,7 @@ static int save_received_data(const char *filename){
 	}
 
 	do {
-		libusb_bulk_transfer(handle, LIBUSB_ENDPOINT_IN | 1, buf, sizeof(buf), &transferred, 10);// no error handling because device-side is a mess anyway
+		libusb_bulk_transfer(handle, LIBUSB_ENDPOINT_IN, buf, sizeof(buf), &transferred, 10);// no error handling because device-side is a mess anyway
 		fwrite(buf, 1, transferred, fd);
 		total_transferred += transferred;
 	} while(transferred);
@@ -248,6 +258,7 @@ static int save_received_data(const char *filename){
 
 	return total_transferred;
 }
+
 
 int main(int argc, char *argv[])
 {
@@ -303,10 +314,31 @@ int main(int argc, char *argv[])
 		return EXIT_FAILURE;
 	}
 
-	rc = libusb_init (&ctx);
+	rc = libusb_init(&ctx);
 	if (rc < 0)
 	{
 		fprintf(stderr, "Error: failed to initialise libusb: %s\n", libusb_error_name(rc));
+		return EXIT_FAILURE;
+	}
+
+	handle = getdev("Pixel ROM Recovery");
+	if (!handle) {
+		fprintf(stderr, "Error: cannot open device");
+		libusb_exit (NULL);
+		return EXIT_FAILURE;
+	}
+
+#if 0
+	rc = libusb_claim_interface(handle, 0);
+	if(rc) {
+		fprintf(stderr, "Error claiming interface: %s\n", libusb_error_name(rc));
+		return EXIT_FAILURE;
+	}
+#endif
+
+	rc = libusb_claim_interface(handle, 1);
+	if(rc) {
+		fprintf(stderr, "Error claiming interface: %s\n", libusb_error_name(rc));
 		return EXIT_FAILURE;
 	}
 
@@ -314,18 +346,6 @@ int main(int argc, char *argv[])
 	libusb_set_debug(ctx, LIBUSB_LOG_LEVEL_DEBUG);
 	#endif
 
-	handle = libusb_open_device_with_vid_pid(NULL, VENDOR_ID, PRODUCT_ID);
-	if (!handle) {
-		fprintf(stderr, "Error: cannot open device %04x:%04x\n", VENDOR_ID, PRODUCT_ID);
-		libusb_exit (NULL);
-		return EXIT_FAILURE;
-	}
-
-	rc = libusb_claim_interface(handle, 0);
-	if(rc) {
-		fprintf(stderr, "Error claiming interface: %s\n", libusb_error_name(rc));
-		return EXIT_FAILURE;
-	}
 
 	if(mode == EXPLOIT_MODE){
 		target_id = identify_target();
@@ -346,7 +366,7 @@ int main(int argc, char *argv[])
 	#if DEBUG
 	sleep(5);
 	#endif
-	libusb_release_interface(handle, 0);
+	libusb_release_interface(handle, 1);
 
 	if (handle) {
 		libusb_close (handle);
